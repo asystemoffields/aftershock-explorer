@@ -38,22 +38,4 @@ export const probAtLeastOne = (P, Mm, M0, t1, t2) => 1 - Math.exp(-expectedCount
 // Instantaneous daily rate of aftershocks ≥ M0 at time t (days) — for the decay curve.
 export const ratePerDay = (P, Mm, M0, t) => Math.pow(10, P.a + P.b * (Mm - M0)) * Math.pow(t + P.c, -P.p);
 
-export const WINDOWS = [
-  { label: 'Next 24 hours', t1: 0, t2: 1 },
-  { label: 'Next week', t1: 0, t2: 7 },
-  { label: 'Next month', t1: 0, t2: 30 },
-  { label: 'Next year', t1: 0, t2: 365 },
-];
-
-// Forecast grid: for each window, expected count + probability at each magnitude threshold.
-// "larger than the mainshock" is included as M0 = Mm.
-export function forecastTable(P, Mm, magThresholds, windows = WINDOWS) {
-  return windows.map((w) => ({
-    window: w.label,
-    rows: magThresholds.map((M0) => ({
-      M0,
-      expected: expectedCount(P, Mm, M0, w.t1, w.t2),
-      prob: probAtLeastOne(P, Mm, M0, w.t1, w.t2),
-    })),
-  }));
-}
+// (forecast windows + table are built in app.js, where the elapsed-time offset is applied.)
