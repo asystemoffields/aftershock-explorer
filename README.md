@@ -11,7 +11,7 @@ browser; nothing is sent anywhere.
 > forecasts and safety guidance, see [USGS](https://earthquake.usgs.gov/data/oaf/) and your
 > national/local agency.
 
-**Live:** _(deploy link TBD)_
+**Live:** https://asystemoffields.github.io/aftershock-explorer/
 
 ## Why this exists
 
