@@ -5,16 +5,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Aftershock Forecast Explorer</title>
   <meta name="description" content="An open, global, educational explainer of how earthquake aftershock probabilities decay over time — built on published statistics and public USGS data. Not an official forecast or warning." />
+  <meta name="theme-color" content="#0e1116" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Aftershock Forecast Explorer" />
+  <meta property="og:description" content="Open, global, educational explainer of how earthquake aftershock chances rise and fade over time, over public USGS data. Not an official forecast or warning." />
+  <meta property="og:url" content="https://asystemoffields.github.io/aftershock-explorer/" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌎</text></svg>" />
   <link rel="stylesheet" href="css/style.css" />
 </head>
 <body>
   <header>
     <div class="titles">
-      <span class="title"><b>Aftershock</b> Forecast Explorer</span>
+      <h1 class="title"><b>Aftershock</b> Forecast Explorer</h1>
       <span class="subtitle">How aftershock chances rise and fade — open, global, educational</span>
     </div>
     <span class="spacer"></span>
-    <button class="btn sm" id="btn-help" title="How this works">?</button>
+    <button class="btn sm" id="btn-help" title="How this works" aria-label="How this works (help)">?</button>
   </header>
 
   <div class="disclaimer">
@@ -31,12 +37,12 @@
       <div class="ctl">
         <label for="feed">Pick a recent earthquake</label>
         <select id="feed"></select>
-        <select id="quake"><option>— loading recent quakes… —</option></select>
+        <select id="quake" aria-label="Recent earthquakes"><option>— loading recent quakes… —</option></select>
       </div>
       <div class="ctl">
         <label for="in-mag">…or set a magnitude</label>
         <div class="row">
-          <input id="in-mag" type="number" min="3" max="9.5" step="0.1" value="7.0" />
+          <input id="in-mag" type="number" min="3" max="9.6" step="0.1" value="7.0" />
           <button class="btn sm" id="btn-mag">Use</button>
         </div>
         <label for="in-id" class="mt">…or USGS event ID</label>
@@ -61,31 +67,34 @@
       </div>
     </section>
 
+    <div id="status" class="status hidden" role="status" aria-live="polite"></div>
+
     <section class="block">
-      <h3>Aftershock forecast <span class="hint" id="fc-sub"></span></h3>
+      <h2>Aftershock forecast <span class="hint" id="fc-sub"></span></h2>
       <p class="hint">Chance of <b>one or more</b> aftershocks of at least each magnitude, in each window
-        (and the typical expected number). Aftershocks can themselves be damaging.</p>
+        (and the typical expected number; hover a number for its uncertainty range). Aftershocks can themselves be damaging.</p>
       <div id="table-wrap"></div>
+      <div id="fc-note" class="fc-note"></div>
     </section>
 
     <section class="block">
-      <h3>How the rate decays <span class="hint">modified Omori law — aftershocks/day vs. time</span></h3>
-      <canvas id="curve"></canvas>
+      <h2>How the rate decays <span class="hint">modified Omori law — aftershocks/day vs. time</span></h2>
+      <canvas id="curve" role="img" aria-label="Log-log chart of aftershock rate per day versus time since the mainshock, showing modified-Omori decay for magnitude 3-plus and 5-plus events"></canvas>
       <div class="legend" id="curve-legend"></div>
     </section>
   </main>
 
   <footer>
     <span>Earthquake data: <a href="https://earthquake.usgs.gov/" target="_blank" rel="noopener">USGS</a> (public domain).
-      Model: Reasenberg &amp; Jones (1989/1994) + generic parameters after Page et al. (2016).</span>
+      Model: Reasenberg &amp; Jones (1989/1994) + generic parameters after Page et al. (2016) &amp; Hardebeck et al. (2018).</span>
     <span class="spacer"></span>
-    <span>MIT · <a id="repo-link" href="#" target="_blank" rel="noopener">source</a></span>
+    <span>MIT · <a id="repo-link" href="https://github.com/asystemoffields/aftershock-explorer" target="_blank" rel="noopener">source</a></span>
   </footer>
 
-  <div id="help-modal" class="modal hidden">
+  <div id="help-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="help-title">
     <div class="modal-card">
-      <button class="x" id="help-close">×</button>
-      <h2>Reading an aftershock forecast</h2>
+      <button class="x" id="help-close" aria-label="Close help">×</button>
+      <h2 id="help-title">Reading an aftershock forecast</h2>
       <p>After a large earthquake, smaller (and occasionally larger) earthquakes follow. Their rate is
         remarkably regular: it <b>decays roughly as 1/time</b> (the <i>modified Omori law</i>), and the
         number scales with the mainshock size (Gutenberg-Richter). Combining these — the
@@ -94,8 +103,11 @@
         <li>This tool computes those chances live in your browser from published parameters and the
           mainshock magnitude. Pick a real earthquake or set a magnitude.</li>
         <li>A <b>forecast is not a prediction</b>: it states probabilities, not what <i>will</i> happen.</li>
-        <li>The biggest aftershocks are the dangerous ones — note the chance of an aftershock
-          <b>larger than the mainshock</b> (a sign the "mainshock" was a foreshock).</li>
+        <li>Watch the chance of an aftershock <b>larger than the mainshock</b> — if one occurs, the original
+          “mainshock” is reclassified as a foreshock. (As a rough rule, USGS notes any quake has about a 5%
+          chance of being followed by a larger one within a week; the model’s estimate can differ.)</li>
+        <li>These are <b>generic</b> initial estimates (not fitted to the actual unfolding sequence), so they
+          carry large uncertainty — easily several-fold. Observed aftershocks would sharpen them.</li>
         <li>USGS issues authoritative operational forecasts for the US and territories; this is an open,
           global, <b>educational</b> complement, not a replacement.</li>
       </ul>

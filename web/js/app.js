@@ -1,5 +1,5 @@
 // app.js — Aftershock Forecast Explorer UI.
-import { REGIMES, DEFAULT_REGIME, PARAMS_VERIFIED, expectedCount, ratePerDay } from './aftershock.js';
+import { REGIMES, DEFAULT_REGIME, PARAMS_VERIFIED, expectedCount, probAtLeastOne, ratePerDay } from './aftershock.js';
 import { fetchFeed, fetchEvent } from './comcat.js';
 
 const $ = (id) => document.getElementById(id);
@@ -12,17 +12,31 @@ const FEEDS = [
   { v: '2.5_week', t: 'M2.5+ — past week' },
 ];
 const MAG_THRESHOLDS = [3, 4, 5, 6];
+const MAG_MIN = 3, MAG_MAX = 9.6;
 
 const fmtPct = (p) => { const x = p * 100; return x >= 1 ? Math.round(x) + '%' : x >= 0.1 ? x.toFixed(1) + '%' : x > 0 ? '<0.1%' : '0%'; };
 const pctClass = (p) => { const x = p * 100; return x >= 50 ? 'p-hi' : x >= 5 ? 'p-md' : 'p-lo'; };
 const fmtExp = (n) => (n >= 10 ? Math.round(n) : n >= 1 ? n.toFixed(1) : n >= 0.1 ? n.toFixed(2) : n > 0 ? n.toExponential(0) : '0');
 const fmtTime = (ms) => { try { return new Date(ms).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'; } catch (e) { return ''; } };
 
-function setMainshock(mag, place, time) {
-  state.Mm = mag; state.place = place; state.time = time;
-  $('ms-mag').textContent = 'M' + Number(mag).toFixed(1);
-  $('ms-place').textContent = place || '';
-  $('ms-time').textContent = time ? fmtTime(time) : '';
+function setStatus(msg, isError) {
+  const s = $('status'); if (!s) return;
+  s.textContent = msg; s.classList.remove('hidden'); s.classList.toggle('err', !!isError);
+}
+function clearStatus() { const s = $('status'); if (s) s.classList.add('hidden'); }
+
+function setMainshock(q) {
+  if (!Number.isFinite(q.mag)) { setStatus('That event has no magnitude — try another.', true); return; }
+  state.Mm = q.mag; state.place = q.place; state.time = q.time;
+  $('ms-mag').textContent = 'M' + Number(q.mag).toFixed(1);
+  $('ms-place').textContent = q.place || q.title || '';
+  const bits = [];
+  if (q.time) bits.push(fmtTime(q.time));
+  if (q.magType) bits.push(String(q.magType).toUpperCase());
+  $('ms-time').textContent = bits.join(' · ');
+  if (q.type && q.type !== 'earthquake')
+    setStatus(`Note: this event is classified as “${q.type}”, not an earthquake — the model assumes a tectonic mainshock.`, false);
+  else clearStatus();
   render();
 }
 
@@ -36,26 +50,33 @@ function render() {
   const rows = MAG_THRESHOLDS.map((M0) => ({ label: 'M ≥ ' + M0, M0, larger: false }));
   rows.push({ label: '≥ M' + state.Mm.toFixed(1) + ' (larger than mainshock)', M0: state.Mm, larger: true });
 
-  let html = '<table><thead><tr><th>magnitude</th>' + windows.map((w) => `<th>${w.label}</th>`).join('') + '</tr></thead><tbody>';
+  const sig = Math.pow(10, P.aSigma); // 1σ multiplicative spread on the rate
+  let html = '<table aria-label="Aftershock forecast: chance and expected number by magnitude and time window">'
+    + '<thead><tr><th scope="col">magnitude</th>' + windows.map((w) => `<th scope="col">${w.label}</th>`).join('') + '</tr></thead><tbody>';
   for (const r of rows) {
-    html += `<tr${r.larger ? ' class="larger"' : ''}><td class="mag">${r.label}</td>`;
+    html += `<tr${r.larger ? ' class="larger"' : ''}><th scope="row" class="mag">${r.label}</th>`;
     for (const w of windows) {
       const ex = expectedCount(P, state.Mm, r.M0, w.t1, w.t2);
-      const pr = 1 - Math.exp(-ex);
-      html += `<td><span class="pct ${pctClass(pr)}">${fmtPct(pr)}</span><span class="exp">~${fmtExp(ex)} expected</span></td>`;
+      const pr = probAtLeastOne(P, state.Mm, r.M0, w.t1, w.t2);
+      const band = `≈ ${fmtExp(ex / sig)}–${fmtExp(ex * sig)} expected at 1σ uncertainty`;
+      html += `<td><span class="pct ${pctClass(pr)}">${fmtPct(pr)}</span><span class="exp" title="${band}">~${fmtExp(ex)} expected</span></td>`;
     }
     html += '</tr>';
   }
   html += '</tbody></table>';
   $('table-wrap').innerHTML = html;
   $('fc-sub').textContent = e > 0 ? `(starting ${e} day${e === 1 ? '' : 's'} after the mainshock)` : '';
+  $('fc-note').innerHTML = '';
+  $('fc-note').append(
+    note(`Generic estimates carry large uncertainty — the true rate for this sequence could plausibly be several-fold higher or lower (≈ ×${sig.toFixed(1)} / ÷${sig.toFixed(1)} at 1σ), and would sharpen as real aftershocks are recorded.`),
+    note('Rule of thumb: USGS notes any earthquake has roughly a 5% chance of being followed by a larger one nearby within a week; the model’s regime-specific estimate above can differ.'),
+  );
 
   drawCurve(P);
-  window.__STATE = {
-    Mm: state.Mm, regime: state.regime, elapsed: e, verified: PARAMS_VERIFIED,
-    week_M3_prob: +(1 - Math.exp(-expectedCount(P, state.Mm, 3, e, e + 7))).toFixed(4),
-  };
+  window.__STATE = { Mm: state.Mm, regime: state.regime, elapsed: e, verified: PARAMS_VERIFIED,
+    week_M3_prob: +probAtLeastOne(P, state.Mm, 3, e, e + 7).toFixed(4) };
 }
+function note(text) { const d = document.createElement('div'); d.textContent = text; return d; }
 
 function drawCurve(P) {
   const cv = $('curve'), dpr = window.devicePixelRatio || 1;
@@ -96,44 +117,57 @@ function drawCurve(P) {
 const sup = (n) => String(n).replace('-', '⁻').replace(/\d/g, (d) => '⁰¹²³⁴⁵⁶⁷⁸⁹'[d]);
 
 async function loadFeed() {
+  $('quake').innerHTML = '<option>— loading… —</option>';
   try {
     quakes = await fetchFeed($('feed').value);
     const sel = $('quake'); sel.innerHTML = '';
-    if (!quakes.length) { sel.innerHTML = '<option>— none in this feed —</option>'; return; }
+    if (!quakes.length) { sel.innerHTML = '<option value="">— none in this feed —</option>'; return; }
     const ph = document.createElement('option'); ph.value = ''; ph.textContent = `— ${quakes.length} quakes — pick one —`; sel.appendChild(ph);
     quakes.forEach((q, i) => { const o = document.createElement('option'); o.value = i; o.textContent = `M${q.mag != null ? q.mag.toFixed(1) : '?'} — ${q.place || q.title || q.id}`; sel.appendChild(o); });
-  } catch (e) { $('quake').innerHTML = '<option>— feed error —</option>'; }
+    clearStatus();
+  } catch (e) {
+    $('quake').innerHTML = '<option value="">— unavailable —</option>';
+    setStatus('Couldn’t load the recent-quake list (' + e.message + '). You can still set a magnitude or load by ID.', true);
+  }
 }
 async function loadById() {
   const id = $('in-id').value.trim(); if (!id) return;
-  try { const q = await fetchEvent(id); if (q.mag == null) throw new Error('no magnitude'); setMainshock(q.mag, q.place || q.title, q.time); }
-  catch (e) { $('ms-place').textContent = 'Could not load "' + id + '": ' + e.message; }
+  setStatus('Loading ' + id + '…', false);
+  try { setMainshock(await fetchEvent(id)); } // setMainshock clears/sets status
+  catch (e) { setStatus(`Couldn’t load "${id}": ${e.message}. The mainshock below is unchanged.`, true); }
 }
 
+function openHelp() { $('help-modal').classList.remove('hidden'); $('help-close').focus(); }
+function closeHelp() { $('help-modal').classList.add('hidden'); $('btn-help').focus(); }
+
+let resizeRaf = 0;
 function init() {
   for (const [k, v] of Object.entries(REGIMES)) { const o = document.createElement('option'); o.value = k; o.textContent = v.label; $('regime').appendChild(o); }
   $('regime').value = DEFAULT_REGIME;
   $('regime').addEventListener('change', (e) => { state.regime = e.target.value; render(); });
   for (const f of FEEDS) { const o = document.createElement('option'); o.value = f.v; o.textContent = f.t; $('feed').appendChild(o); }
   $('feed').addEventListener('change', loadFeed);
-  $('quake').addEventListener('change', () => { const q = quakes[+$('quake').value]; if (q) setMainshock(q.mag, q.place || q.title, q.time); });
-  $('btn-mag').addEventListener('click', () => { const m = parseFloat($('in-mag').value); if (m >= 3 && m <= 9.9) setMainshock(m, `(magnitude ${m.toFixed(1)} scenario)`, Date.now()); });
+  $('quake').addEventListener('change', () => { const q = quakes[+$('quake').value]; if (q) setMainshock(q); });
+  $('btn-mag').addEventListener('click', () => {
+    const m = parseFloat($('in-mag').value);
+    if (Number.isFinite(m) && m >= MAG_MIN && m <= MAG_MAX) setMainshock({ mag: m, place: `(magnitude ${m.toFixed(1)} scenario)`, time: Date.now() });
+    else setStatus(`Enter a magnitude between ${MAG_MIN} and ${MAG_MAX}.`, true);
+  });
   $('btn-id').addEventListener('click', loadById);
   $('in-id').addEventListener('keydown', (e) => { if (e.key === 'Enter') loadById(); });
   $('elapsed').addEventListener('input', (e) => { state.elapsed = +e.target.value; $('elapsed-lab').textContent = `${state.elapsed} day${state.elapsed === 1 ? '' : 's'}`; render(); });
-  $('btn-help').addEventListener('click', () => $('help-modal').classList.remove('hidden'));
-  $('help-close').addEventListener('click', () => $('help-modal').classList.add('hidden'));
-  $('help-modal').addEventListener('click', (e) => { if (e.target.id === 'help-modal') $('help-modal').classList.add('hidden'); });
+  $('btn-help').addEventListener('click', openHelp);
+  $('help-close').addEventListener('click', closeHelp);
+  $('help-modal').addEventListener('click', (e) => { if (e.target.id === 'help-modal') closeHelp(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('help-modal').classList.contains('hidden')) closeHelp(); });
+  window.addEventListener('resize', () => { cancelAnimationFrame(resizeRaf); resizeRaf = requestAnimationFrame(render); });
 
-  if (!PARAMS_VERIFIED) {
-    const n = $('param-notice'); n.classList.remove('hidden');
-    n.innerHTML = '⚙ <b>Model parameters are provisional</b> — being verified against Page et al. (2016). The probabilities illustrate the method; values are not final.';
-  }
-  $('help-params').textContent = 'Model: Reasenberg-Jones generic parameters (a, b, p, c) by tectonic setting, from USGS OAF operational values — Page et al. (2016) globally, Hardebeck et al. (2018) for California. Generic estimates carry large uncertainty (the per-sequence rate can differ several-fold); observed aftershocks would refine them.';
+  if (!PARAMS_VERIFIED) { const n = $('param-notice'); n.classList.remove('hidden'); n.textContent = 'Model parameters are provisional.'; }
+  $('help-params').textContent = 'Model: Reasenberg-Jones generic parameters (a, b, p, c) by tectonic setting, from USGS OAF operational values — Page et al. (2016) globally, Hardebeck et al. (2018) for California.';
 
-  setMainshock(7.0, '(magnitude 7.0 scenario)', Date.now());
+  setMainshock({ mag: 7.0, place: '(magnitude 7.0 scenario)', time: Date.now() });
   loadFeed();
-  window.__setMag = (m) => setMainshock(m, '(test)', Date.now());
+  window.__setMag = (m) => setMainshock({ mag: m, place: '(test)', time: Date.now() });
   window.__READY = true;
 }
 
